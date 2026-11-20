@@ -1,9 +1,11 @@
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
 from issuehunter.config import get_settings
+from issuehunter.storage import Storage
 
 
 class RepositoryError(Exception):
@@ -25,35 +27,17 @@ class RepositoryInspector:
     """Clones and inspects repositories without executing their code."""
 
     IGNORED_DIRECTORIES = {
-        ".git",
-        ".venv",
-        "venv",
-        "__pycache__",
-        "node_modules",
-        "vendor",
-        "dist",
-        "build",
-        ".tox",
-        ".mypy_cache",
-        ".pytest_cache",
+        ".git", ".venv", "venv", "__pycache__",
+        "node_modules", "vendor", "dist", "build",
+        ".tox", ".mypy_cache", ".pytest_cache",
     }
 
     PROJECT_FILES = {
-        "pyproject.toml",
-        "setup.py",
-        "setup.cfg",
-        "requirements.txt",
-        "Pipfile",
-        "poetry.lock",
-        "package.json",
-        "Cargo.toml",
-        "go.mod",
-        "pom.xml",
-        "build.gradle",
-        "Gemfile",
-        "composer.json",
-        "Makefile",
-        "README.md",
+        "pyproject.toml", "setup.py", "setup.cfg",
+        "requirements.txt", "Pipfile", "poetry.lock",
+        "package.json", "Cargo.toml", "go.mod",
+        "pom.xml", "build.gradle", "Gemfile",
+        "composer.json", "Makefile", "README.md",
     }
 
     LANGUAGE_EXTENSIONS = {
@@ -72,10 +56,15 @@ class RepositoryInspector:
         ".c": "C",
     }
 
-    def __init__(self, workspace: Path | None = None) -> None:
+    def __init__(
+        self,
+        workspace: Path | None = None,
+        storage: Storage | None = None,
+    ) -> None:
         settings = get_settings()
         self.workspace = workspace or settings.workspace_path
         self.workspace.mkdir(parents=True, exist_ok=True)
+        self.storage = storage or Storage()
 
     @staticmethod
     def _run_git(
@@ -83,7 +72,7 @@ class RepositoryInspector:
         cwd: Path | None = None,
         timeout: int = 120,
     ) -> str:
-        """Execute a Git command without invoking a shell."""
+        """Execute Git without invoking a shell."""
         try:
             result = subprocess.run(
                 ["git", *arguments],
@@ -93,14 +82,17 @@ class RepositoryInspector:
                 timeout=timeout,
                 check=False,
                 env={
-                    "PATH": __import__("os").environ.get("PATH", ""),
+                    **os.environ,
                     "GIT_TERMINAL_PROMPT": "0",
                     "GIT_CONFIG_NOSYSTEM": "1",
-                    "GIT_CONFIG_GLOBAL": "/dev/null",
+                    "GIT_CONFIG_GLOBAL": os.devnull,
+                    "GIT_ALLOW_PROTOCOL": "https",
                 },
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
-            raise RepositoryError(f"Git command failed: {exc}") from exc
+            raise RepositoryError(
+                f"Git command failed: {exc}"
+            ) from exc
 
         if result.returncode != 0:
             raise RepositoryError(
@@ -129,13 +121,32 @@ class RepositoryInspector:
 
         return parts[0], parts[1]
 
+    def _require_approved(self, full_name: str) -> None:
+        """Prevent cloning repositories that have not passed screening."""
+        repository = self.storage.get_repository(full_name)
+
+        if repository is None:
+            raise RepositoryError(
+                f"Repository {full_name} has not been screened."
+            )
+
+        if repository["screening_status"] != "approved":
+            raise RepositoryError(
+                f"Repository {full_name} is not approved for cloning. "
+                f"Screening status: {repository['screening_status']}."
+            )
+
     def clone(self, full_name: str) -> Path:
         """
-        Clone a public GitHub repository or update an existing clone.
+        Clone or update an approved public GitHub repository.
 
         Does not initialize submodules or execute repository code.
         """
         owner, repository = self._repository_parts(full_name)
+
+        # Check screening before any Git operation.
+        self._require_approved(full_name)
+
         destination = self.workspace / owner / repository
 
         if destination.exists():
@@ -193,10 +204,9 @@ class RepositoryInspector:
         project_files: list[str] = []
         language_counts: dict[str, int] = {}
 
-        for current_path, directories, filenames in __import__(
-            "os"
-        ).walk(path, followlinks=False):
-
+        for current_path, directories, filenames in os.walk(
+            path, followlinks=False
+        ):
             directories[:] = [
                 directory
                 for directory in directories
@@ -219,8 +229,9 @@ class RepositoryInspector:
                 if filename in self.PROJECT_FILES:
                     project_files.append(relative_path)
 
-                extension = file_path.suffix.lower()
-                language = self.LANGUAGE_EXTENSIONS.get(extension)
+                language = self.LANGUAGE_EXTENSIONS.get(
+                    file_path.suffix.lower()
+                )
 
                 if language:
                     language_counts[language] = (
@@ -246,10 +257,7 @@ class RepositoryInspector:
         """Reject paths that escape the repository directory."""
         path = PurePosixPath(relative_path)
 
-        return (
-            not path.is_absolute()
-            and ".." not in path.parts
-        )
+        return not path.is_absolute() and ".." not in path.parts
 
     def read_file(
         self,
@@ -257,7 +265,7 @@ class RepositoryInspector:
         relative_path: str,
         max_bytes: int = 100_000,
     ) -> str:
-        """Read a text file from a cloned repository with size limits."""
+        """Read a text file with path and size restrictions."""
         if max_bytes < 1:
             raise ValueError("max_bytes must be positive.")
 
@@ -272,7 +280,9 @@ class RepositoryInspector:
         target = root.joinpath(*relative.parts)
 
         if target.is_symlink():
-            raise RepositoryError("Refusing to read a symbolic link.")
+            raise RepositoryError(
+                "Refusing to read a symbolic link."
+            )
 
         try:
             resolved = target.resolve(strict=True)
@@ -283,7 +293,9 @@ class RepositoryInspector:
             ) from exc
 
         if not resolved.is_file():
-            raise RepositoryError("Requested path is not a regular file.")
+            raise RepositoryError(
+                "Requested path is not a regular file."
+            )
 
         if resolved.stat().st_size > max_bytes:
             raise RepositoryError(
