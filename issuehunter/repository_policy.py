@@ -34,11 +34,7 @@ class RepositoryPolicyError(Exception):
 
 
 class RepositoryPolicy:
-    """
-    Screens repositories before cloning or LLM analysis.
-
-    Uses GitHub repository metadata and a SQLite cache.
-    """
+    """Screens GitHub repositories before cloning or LLM analysis."""
 
     MIN_STARS = 50
     MIN_AGE_DAYS = 90
@@ -46,8 +42,6 @@ class RepositoryPolicy:
     MAX_SIZE_KB = 500_000
     CACHE_HOURS = 24
 
-    # Only recognized SPDX identifiers are accepted.
-    # This is a deliberately conservative initial allowlist.
     ACCEPTED_LICENSES = {
         "MIT",
         "Apache-2.0",
@@ -99,7 +93,10 @@ class RepositoryPolicy:
         if self._owns_client:
             self.client.close()
 
-    def _validate_repository_name(self, full_name: str) -> tuple[str, str]:
+    def _validate_repository_name(
+        self,
+        full_name: str,
+    ) -> tuple[str, str]:
         """Validate and split an owner/repository identifier."""
         parts = full_name.split("/")
 
@@ -153,10 +150,71 @@ class RepositoryPolicy:
 
         return data
 
-    def _evaluate(self, metadata: dict) -> RepositoryCheck:
-        """Apply the configured repository screening rules."""
-        full_name = metadata["full_name"]
+    def _check_security_advisories(
+        self,
+        full_name: str,
+    ) -> list[str]:
+        """
+        Check for open Dependabot alerts.
 
+        An inaccessible endpoint or invalid response requires
+        manual review. It is never interpreted as a clean result.
+        """
+        owner, repository = self._validate_repository_name(full_name)
+
+        endpoint = (
+            f"/repos/{quote(owner, safe='')}/"
+            f"{quote(repository, safe='')}/dependabot/alerts"
+        )
+
+        try:
+            response = self.client.get(
+                endpoint,
+                params={
+                    "state": "open",
+                    "per_page": 1,
+                },
+            )
+
+        except httpx.RequestError as exc:
+            return [
+                "Could not verify Dependabot alerts. "
+                f"Manual security review required: {exc}"
+            ]
+
+        if response.status_code != 200:
+            return [
+                "Dependabot alerts could not be inspected "
+                f"(HTTP {response.status_code}). Check token "
+                "permissions and repository security settings. "
+                "Manual review required."
+            ]
+
+        try:
+            alerts = response.json()
+        except ValueError:
+            return [
+                "GitHub returned an invalid Dependabot alert response. "
+                "Manual review required."
+            ]
+
+        if not isinstance(alerts, list):
+            return [
+                "GitHub returned an unexpected Dependabot alert format. "
+                "Manual review required."
+            ]
+
+        if alerts:
+            return [
+                "At least one open Dependabot alert exists. "
+                "Manual security review required."
+            ]
+
+        return []
+
+    def _evaluate(self, metadata: dict) -> RepositoryCheck:
+        """Apply repository metadata screening rules."""
+        full_name = metadata["full_name"]
         now = datetime.now(timezone.utc)
 
         try:
@@ -181,7 +239,10 @@ class RepositoryPolicy:
 
         if (
             created_at.tzinfo is None
-            or (pushed_at is not None and pushed_at.tzinfo is None)
+            or (
+                pushed_at is not None
+                and pushed_at.tzinfo is None
+            )
         ):
             raise RepositoryPolicyError(
                 f"Repository dates lack timezone information: {full_name}."
@@ -203,13 +264,13 @@ class RepositoryPolicy:
         warnings: list[str] = []
 
         license_data = metadata.get("license") or {}
+
         license_id = (
             license_data.get("spdx_id")
             if isinstance(license_data, dict)
             else None
         )
 
-        # Hard rejection rules.
         if metadata.get("private"):
             reasons.append("Repository is private.")
 
@@ -253,17 +314,6 @@ class RepositoryPolicy:
         if not metadata.get("default_branch"):
             reasons.append("Repository has no default branch.")
 
-        # Security signals requiring manual review.
-        if metadata.get("security_advisory_count", 0):
-            warnings.append(
-                "Repository has reported security advisories."
-            )
-
-        if metadata.get("archived") is False and not metadata.get(
-            "description"
-        ):
-            warnings.append("Repository has no description.")
-
         if reasons:
             status = "rejected"
         elif warnings:
@@ -300,12 +350,16 @@ class RepositoryPolicy:
             ).days,
         )
 
-    def check(self, full_name: str, force_refresh: bool = False) -> RepositoryCheck:
+    def check(
+        self,
+        full_name: str,
+        force_refresh: bool = False,
+    ) -> RepositoryCheck:
         """
-        Screen a repository.
+        Screen a repository using cached or fresh GitHub information.
 
-        Uses cached results for 24 hours unless force_refresh=True.
-        Raises RepositoryPolicyError if verification is unavailable.
+        Cache lifetime: 24 hours.
+        API verification failures never result in approval.
         """
         self._validate_repository_name(full_name)
 
@@ -319,14 +373,30 @@ class RepositoryPolicy:
                 return self._from_cache(cached)
 
         metadata = self._get_metadata(full_name)
+
         actual_name = metadata.get("full_name")
 
-        if actual_name is None or actual_name.casefold() != full_name.casefold():
+        if (
+            actual_name is None
+            or actual_name.casefold() != full_name.casefold()
+        ):
             raise RepositoryPolicyError(
                 "GitHub returned metadata for a different repository."
             )
 
         result = self._evaluate(metadata)
+
+        # Security checks are performed even if metadata already
+        # contains a rejection, so the cached record has full results.
+        security_warnings = self._check_security_advisories(full_name)
+        result.warnings.extend(security_warnings)
+
+        if result.reasons:
+            result.status = "rejected"
+        elif result.warnings:
+            result.status = "needs_review"
+        else:
+            result.status = "approved"
 
         self.storage.save_repository_screening(
             metadata=metadata,
