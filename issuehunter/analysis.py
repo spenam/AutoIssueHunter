@@ -13,6 +13,7 @@ from issuehunter.models import (
     ReproductionStatus,
 )
 from issuehunter.storage import Storage
+from issuehunter.repository import RepositoryInspector
 
 SYSTEM_PROMPT = """
 You are a senior software engineer investigating open-source GitHub issues.
@@ -83,9 +84,13 @@ class IssueAnalyzer:
         self,
         llm: OllamaClient | None = None,
         storage: Storage | None = None,
+        repository_inspector: RepositoryInspector | None = None,
     ) -> None:
         self.llm = llm or OllamaClient()
         self.storage = storage or Storage()
+        self.repository_inspector = (
+            repository_inspector or RepositoryInspector(storage=self.storage)
+        )
         self.storage.initialize()
 
     def analyze(
