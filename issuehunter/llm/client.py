@@ -76,6 +76,7 @@ class OllamaClient:
                     "messages": messages,
                     "stream": False,
                     "format": "json",
+                    "think": False,
                     "options": {
                         "temperature": temperature,
                         "num_ctx": self.settings.ollama_num_ctx,
@@ -97,7 +98,17 @@ class OllamaClient:
 
         try:
             payload = response.json()
-            content = payload["message"]["content"]
+            message = payload.get("message", {})
+            content = message.get("content", "")
+
+            if not content.strip():
+                raise OllamaError(
+                    "Ollama returned empty content. "
+                    f"Done reason: {payload.get('done_reason')}; "
+                    f"Thinking: {message.get('thinking', '')[:500]!r}; "
+                    f"Generated tokens: {payload.get('eval_count')}"
+                )
+            #content = payload["message"]["content"]
 
             if not isinstance(content, str):
                 raise TypeError("Response content is not text.")
