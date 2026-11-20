@@ -35,6 +35,7 @@ class Settings(BaseSettings):
     # Application
     log_level: LogLevel = "INFO"
     request_timeout: float = Field(default=30.0, gt=0, le=10000)
+    ollama_num_ctx: int = Field(default=8192, ge=2048, le=32768)
 
     # Discovery preferences
     default_language: str = "python"

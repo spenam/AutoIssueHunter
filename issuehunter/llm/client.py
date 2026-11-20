@@ -14,12 +14,12 @@ class OllamaClient:
     """Client for generating responses with a local Ollama model."""
 
     def __init__(self) -> None:
-        settings = get_settings()
+        self.settings = get_settings()
 
-        self.model = settings.ollama_model
+        self.model = self.settings.ollama_model
         self.client = httpx.Client(
-            base_url=settings.ollama_base_url.rstrip("/"),
-            timeout=settings.request_timeout,
+            base_url=self.settings.ollama_base_url.rstrip("/"),
+            timeout=self.settings.request_timeout,
         )
 
     def close(self) -> None:
@@ -77,6 +77,7 @@ class OllamaClient:
                     "stream": False,
                     "options": {
                         "temperature": temperature,
+                        "num_ctx": self.settings.ollama_num_ctx,
                     },
                 },
             )
