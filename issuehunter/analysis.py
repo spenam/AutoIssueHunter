@@ -4,6 +4,7 @@ import re
 from typing import Any
 
 from pydantic import ValidationError
+from pathlib import PurePosixPath
 
 from issuehunter.llm.client import OllamaClient
 from issuehunter.models import (
@@ -146,7 +147,7 @@ class IssueAnalyzer:
                 return existing
 
         try:
-            repository_context, inspection_notes = (
+            repository_context, inspection_notes, files_actually_read = (
                 self._collect_repository_context(issue)
             )
         except Exception as exc:
@@ -218,6 +219,22 @@ class IssueAnalyzer:
                 ),
                 risks=data.get("risks", []),
             )
+            original_file_count = len(analysis.relevant_files)
+
+            analysis.relevant_files = self._validate_relevant_files(
+                analysis.relevant_files,
+                files_actually_read,
+            )
+
+            discarded_file_count = (
+                original_file_count - len(analysis.relevant_files)
+            )
+
+            if discarded_file_count:
+                analysis.investigation_notes.append(
+                    f"Discarded {discarded_file_count} suggested file path(s) "
+                    "because they were not included in the inspected source context."
+                )
 
         except (KeyError, TypeError, ValueError, ValidationError) as exc:
             raise IssueAnalysisError(
@@ -232,9 +249,11 @@ class IssueAnalyzer:
     def _collect_repository_context(
         self,
         issue: Issue,
-    ) -> tuple[str, list[str]]:
+    ) -> tuple[str, list[str], list[str]]:
         """Clone, inspect, and read a bounded selection of repository files."""
         full_name = issue.repository_full_name
+        files_actually_read: list[str] = []
+
 
         self.repository_inspector.clone(full_name)
         repository_info = self.repository_inspector.inspect(full_name)
@@ -283,6 +302,8 @@ class IssueAnalyzer:
                 f"</repository_file>"
             )
 
+            files_actually_read.append(relative_path)
+
         if not source_sections:
             notes.append(
                 "No repository source files were successfully supplied "
@@ -291,7 +312,7 @@ class IssueAnalyzer:
 
         context = "\n\n".join(source_sections)
 
-        return context, notes
+        return context, notes, files_actually_read
 
     def _select_relevant_files(
         self,
@@ -450,3 +471,46 @@ Additional requirements:
 
     def __exit__(self, *args: Any) -> None:
         self.close()
+
+
+    @staticmethod
+    def _normalize_repository_path(path: str) -> str | None:
+        """Normalize a repository-relative path and reject unsafe paths."""
+        raw_path = path.strip().replace("\\", "/")
+
+        if not raw_path or raw_path.startswith("/"):
+            return None
+
+        parts = raw_path.split("/")
+
+        if ".." in parts or ":" in parts[0]:
+            return None
+
+        normalized = PurePosixPath(raw_path).as_posix()
+
+        if normalized in ("", "."):
+            return None
+
+        return normalized
+
+    @classmethod
+    def _validate_relevant_files(
+        cls,
+        suggested_files: list[str],
+        files_actually_read: list[str],
+    ) -> list[str]:
+        """Keep only paths that were successfully included in repository context."""
+        allowed_files = {
+            normalized
+            for path in files_actually_read
+            if (normalized := cls._normalize_repository_path(path)) is not None
+        }
+
+        validated = []
+
+        for path in suggested_files:
+            normalized = cls._normalize_repository_path(path)
+
+            if normalized in allowed_files and normalized not in validated:
+                validated.append(normalized)
+        return validated
