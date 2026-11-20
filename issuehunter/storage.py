@@ -4,7 +4,7 @@ import sqlite3
 from pathlib import Path
 
 from issuehunter.config import get_settings
-from issuehunter.models import Issue
+from issuehunter.models import Issue, IssueAnalysis
 
 
 SCHEMA = """
@@ -36,7 +36,7 @@ CREATE TABLE IF NOT EXISTS analyses (
     issue_id INTEGER NOT NULL,
     summary TEXT NOT NULL,
     analysis_json TEXT NOT NULL,
-    analyzed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    analyzed_at TEXT NOT NULL,
 
     FOREIGN KEY(issue_id) REFERENCES issues(id)
         ON DELETE CASCADE
@@ -44,6 +44,9 @@ CREATE TABLE IF NOT EXISTS analyses (
 
 CREATE INDEX IF NOT EXISTS idx_analyses_issue
 ON analyses(issue_id);
+
+CREATE INDEX IF NOT EXISTS idx_analyses_date
+ON analyses(issue_id, analyzed_at DESC);
 """
 
 
@@ -86,12 +89,7 @@ class Storage:
             return False
 
     def save_issues(self, issues: list[Issue]) -> int:
-        """
-        Save issues to SQLite.
-
-        Existing issues are updated rather than duplicated.
-        Returns the number of issues processed.
-        """
+        """Save issues, updating existing records instead of duplicating them."""
         if not issues:
             return 0
 
@@ -178,3 +176,70 @@ class Storage:
             ).fetchall()
 
         return rows
+
+    def save_analysis(self, analysis: IssueAnalysis) -> int:
+        """
+        Save an issue analysis.
+
+        Multiple analyses per issue are allowed so that future
+        investigations can be retained as history.
+
+        Returns the database ID of the saved analysis.
+        """
+        with self.connect() as connection:
+            cursor = connection.execute(
+                """
+                INSERT INTO analyses (
+                    issue_id,
+                    summary,
+                    analysis_json,
+                    analyzed_at
+                )
+                VALUES (?, ?, ?, ?)
+                """,
+                (
+                    analysis.issue_id,
+                    analysis.summary,
+                    analysis.model_dump_json(),
+                    analysis.analyzed_at.isoformat(),
+                ),
+            )
+
+            return int(cursor.lastrowid)
+
+    def get_latest_analysis(
+        self,
+        issue_id: int,
+    ) -> IssueAnalysis | None:
+        """Retrieve the most recent analysis for a GitHub issue."""
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT analysis_json
+                FROM analyses
+                WHERE issue_id = ?
+                ORDER BY analyzed_at DESC, id DESC
+                LIMIT 1
+                """,
+                (issue_id,),
+            ).fetchone()
+
+        if row is None:
+            return None
+
+        return IssueAnalysis.model_validate_json(row["analysis_json"])
+
+    def has_analysis(self, issue_id: int) -> bool:
+        """Check whether an issue has at least one saved analysis."""
+        with self.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT 1
+                FROM analyses
+                WHERE issue_id = ?
+                LIMIT 1
+                """,
+                (issue_id,),
+            ).fetchone()
+
+        return row is not None
