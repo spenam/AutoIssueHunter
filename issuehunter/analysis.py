@@ -73,8 +73,22 @@ class IssueAnalyzer:
         """
         Analyze an issue and persist the result.
 
+        Only approved repositories can be analyzed.
         Existing analyses are reused unless force=True.
         """
+        repository = self.storage.get_repository(
+            issue.repository_full_name
+        )
+
+        if (
+            repository is None
+            or repository["screening_status"] != "approved"
+        ):
+            raise IssueAnalysisError(
+                f"Repository {issue.repository_full_name} "
+                "has not passed repository screening."
+            )
+
         if not force:
             existing = self.storage.get_latest_analysis(issue.id)
 
