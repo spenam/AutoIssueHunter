@@ -60,6 +60,12 @@ class ContributionScore(BaseModel):
     project_interest_match: float = Field(ge=0, le=100)
     explanation: str = ""
 
+class AnalysisEvidence(BaseModel):
+    """A piece of evidence supporting an analysis finding."""
+
+    source: str
+    description: str
+    evidence_type: str = "repository"
 
 class IssueAnalysis(BaseModel):
     """AI-generated investigation results for a GitHub issue."""
@@ -68,6 +74,12 @@ class IssueAnalysis(BaseModel):
 
     summary: str
     suspected_root_cause: str | None = None
+
+    root_cause_confirmed: bool = False
+    evidence: list[AnalysisEvidence] = Field(default_factory=list)
+    investigation_notes: list[str] = Field(default_factory=list)
+    suggested_changes: list[str] = Field(default_factory=list)
+    regression_tests: list[str] = Field(default_factory=list)
 
     relevant_files: list[str] = Field(default_factory=list)
     relevant_components: list[str] = Field(default_factory=list)
