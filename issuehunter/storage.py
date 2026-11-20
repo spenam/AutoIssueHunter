@@ -1,9 +1,10 @@
 
+import json
 import sqlite3
 from pathlib import Path
-from typing import Iterator
 
 from issuehunter.config import get_settings
+from issuehunter.models import Issue
 
 
 SCHEMA = """
@@ -83,3 +84,97 @@ class Storage:
 
         except sqlite3.Error:
             return False
+
+    def save_issues(self, issues: list[Issue]) -> int:
+        """
+        Save issues to SQLite.
+
+        Existing issues are updated rather than duplicated.
+        Returns the number of issues processed.
+        """
+        if not issues:
+            return 0
+
+        query = """
+        INSERT INTO issues (
+            id,
+            github_number,
+            repository_full_name,
+            title,
+            body,
+            html_url,
+            state,
+            language,
+            labels_json,
+            created_at,
+            updated_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(repository_full_name, github_number)
+        DO UPDATE SET
+            id = excluded.id,
+            title = excluded.title,
+            body = excluded.body,
+            html_url = excluded.html_url,
+            state = excluded.state,
+            language = excluded.language,
+            labels_json = excluded.labels_json,
+            updated_at = excluded.updated_at
+        """
+
+        records = [
+            (
+                issue.id,
+                issue.number,
+                issue.repository_full_name,
+                issue.title,
+                issue.body,
+                str(issue.html_url),
+                issue.state.value,
+                issue.language,
+                json.dumps(issue.labels),
+                issue.created_at.isoformat(),
+                issue.updated_at.isoformat(),
+            )
+            for issue in issues
+        ]
+
+        with self.connect() as connection:
+            connection.executemany(query, records)
+
+        return len(records)
+
+    def get_issue(self, issue_id: int) -> sqlite3.Row | None:
+        """Retrieve an issue by its GitHub issue ID."""
+        with self.connect() as connection:
+            return connection.execute(
+                "SELECT * FROM issues WHERE id = ?",
+                (issue_id,),
+            ).fetchone()
+
+    def list_issues(
+        self,
+        state: str | None = "open",
+        limit: int = 50,
+    ) -> list[sqlite3.Row]:
+        """Retrieve stored issues, optionally filtered by state."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1.")
+
+        query = "SELECT * FROM issues"
+        parameters: list[object] = []
+
+        if state is not None:
+            query += " WHERE state = ?"
+            parameters.append(state)
+
+        query += " ORDER BY updated_at DESC LIMIT ?"
+        parameters.append(limit)
+
+        with self.connect() as connection:
+            rows = connection.execute(
+                query,
+                parameters,
+            ).fetchall()
+
+        return rows
