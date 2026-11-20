@@ -202,13 +202,13 @@ class RepositoryPolicy:
         reasons: list[str] = []
         warnings: list[str] = []
 
-        license_data = metadata.get("license") or {}
+        #license_data = metadata.get("license") or {}
 
-        license_id = (
-            license_data.get("spdx_id")
-            if isinstance(license_data, dict)
-            else None
-        )
+        #license_id = (
+        #    license_data.get("spdx_id")
+        #    if isinstance(license_data, dict)
+        #    else None
+        #)
 
         if metadata.get("private"):
             reasons.append("Repository is private.")

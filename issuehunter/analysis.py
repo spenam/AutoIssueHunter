@@ -1,10 +1,10 @@
 
 import json
 import re
+from pathlib import PurePosixPath
 from typing import Any
 
 from pydantic import ValidationError
-from pathlib import PurePosixPath
 
 from issuehunter.llm.client import OllamaClient
 from issuehunter.models import (
@@ -15,7 +15,6 @@ from issuehunter.models import (
 )
 from issuehunter.repository import RepositoryInspector
 from issuehunter.storage import Storage
-
 
 SYSTEM_PROMPT = """
 You are a senior software engineer investigating open-source GitHub issues.
