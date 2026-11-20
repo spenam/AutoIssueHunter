@@ -1,6 +1,6 @@
 
+from datetime import UTC, datetime
 from unittest.mock import Mock
-from datetime import datetime, timezone
 
 import pytest
 
@@ -26,8 +26,8 @@ def issue():
         language="Python",
         labels=["bug"],
         comments_count=2,
-        created_at=datetime.now(timezone.utc),
-        updated_at=datetime.now(timezone.utc),
+        created_at=datetime.now(UTC),
+        updated_at=datetime.now(UTC),
     )
 
 

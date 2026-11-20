@@ -14,7 +14,6 @@ from issuehunter.models import (
 )
 from issuehunter.storage import Storage
 
-
 SYSTEM_PROMPT = """
 You are a senior software engineer investigating open-source GitHub issues.
 

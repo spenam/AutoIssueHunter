@@ -1,6 +1,6 @@
 
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from urllib.parse import quote
 
 import httpx
@@ -154,7 +154,7 @@ class RepositoryPolicy:
     def _evaluate(self, metadata: dict) -> RepositoryCheck:
         """Apply repository metadata screening rules."""
         full_name = metadata["full_name"]
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
 
         try:
             created_at = datetime.fromisoformat(
@@ -284,7 +284,7 @@ class RepositoryPolicy:
             forks=row["forks"],
             size_kb=row["size_kb"],
             age_days=(
-                datetime.now(timezone.utc)
+                datetime.now(UTC)
                 - datetime.fromisoformat(row["created_at"])
             ).days,
         )

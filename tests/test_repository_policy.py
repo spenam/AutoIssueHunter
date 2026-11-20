@@ -1,5 +1,5 @@
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import Mock
 
 import httpx
@@ -14,7 +14,7 @@ from issuehunter.storage import Storage
 
 def make_metadata(**overrides):
     """Build realistic GitHub repository metadata for testing."""
-    now = datetime.now(timezone.utc)
+    now = datetime.now(UTC)
 
     metadata = {
         "id": 123456,
@@ -107,7 +107,7 @@ def test_rejects_repository_with_too_few_stars(policy):
 
 def test_rejects_repository_too_young(policy):
     created_at = (
-        datetime.now(timezone.utc) - timedelta(days=30)
+        datetime.now(UTC) - timedelta(days=30)
     ).isoformat()
 
     metadata = make_metadata(created_at=created_at)

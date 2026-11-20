@@ -1,13 +1,12 @@
 
 import json
 import sqlite3
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from issuehunter.config import get_settings
 from issuehunter.models import Issue, IssueAnalysis
-
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS repositories (
@@ -195,7 +194,7 @@ class Storage:
         if not owner:
             raise ValueError("Repository owner is missing.")
 
-        checked_at = datetime.now(timezone.utc).isoformat()
+        checked_at = datetime.now(UTC).isoformat()
 
         with self.connect() as connection:
             connection.execute(
@@ -295,7 +294,7 @@ class Storage:
             raise ValueError("max_age_hours must be at least 1.")
 
         cutoff = (
-            datetime.now(timezone.utc)
+            datetime.now(UTC)
             - timedelta(hours=max_age_hours)
         ).isoformat()
 
