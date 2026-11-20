@@ -1,13 +1,61 @@
 
 import json
 import sqlite3
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from typing import Any
 
 from issuehunter.config import get_settings
 from issuehunter.models import Issue, IssueAnalysis
 
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS repositories (
+    full_name TEXT PRIMARY KEY,
+    github_id INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    owner TEXT NOT NULL,
+    html_url TEXT NOT NULL,
+    description TEXT,
+
+    stars INTEGER NOT NULL DEFAULT 0,
+    forks INTEGER NOT NULL DEFAULT 0,
+    size_kb INTEGER NOT NULL DEFAULT 0,
+
+    license_spdx_id TEXT,
+    license_name TEXT,
+
+    created_at TEXT NOT NULL,
+    updated_at TEXT,
+    pushed_at TEXT,
+
+    archived INTEGER NOT NULL DEFAULT 0,
+    disabled INTEGER NOT NULL DEFAULT 0,
+    is_fork INTEGER NOT NULL DEFAULT 0,
+
+    default_branch TEXT,
+
+    screening_status TEXT NOT NULL DEFAULT 'needs_review'
+        CHECK (
+            screening_status IN (
+                'approved',
+                'rejected',
+                'needs_review'
+            )
+        ),
+
+    screening_reasons_json TEXT NOT NULL DEFAULT '[]',
+    screening_warnings_json TEXT NOT NULL DEFAULT '[]',
+
+    last_checked_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_repositories_screening_status
+ON repositories(screening_status);
+
+CREATE INDEX IF NOT EXISTS idx_repositories_last_checked
+ON repositories(last_checked_at);
+
 CREATE TABLE IF NOT EXISTS issues (
     id INTEGER PRIMARY KEY,
     github_number INTEGER NOT NULL,
@@ -53,6 +101,12 @@ ON analyses(issue_id, analyzed_at DESC);
 class Storage:
     """SQLite storage manager for AutoIssueHunter."""
 
+    VALID_SCREENING_STATUSES = {
+        "approved",
+        "rejected",
+        "needs_review",
+    }
+
     def __init__(self, database_path: Path | None = None) -> None:
         settings = get_settings()
 
@@ -87,6 +141,220 @@ class Storage:
 
         except sqlite3.Error:
             return False
+
+    def save_repository_screening(
+        self,
+        metadata: dict[str, Any],
+        screening_status: str,
+        reasons: list[str] | None = None,
+        warnings: list[str] | None = None,
+    ) -> None:
+        """
+        Save GitHub repository metadata and its screening decision.
+
+        Metadata should be the repository object returned by
+        GitHub's GET /repos/{owner}/{repo} endpoint.
+        """
+        if screening_status not in self.VALID_SCREENING_STATUSES:
+            raise ValueError(
+                f"Invalid screening status: {screening_status}"
+            )
+
+        required_fields = (
+            "id",
+            "full_name",
+            "name",
+            "owner",
+            "html_url",
+            "created_at",
+        )
+
+        missing_fields = [
+            field
+            for field in required_fields
+            if metadata.get(field) is None
+        ]
+
+        if missing_fields:
+            raise ValueError(
+                "Incomplete GitHub repository metadata. Missing: "
+                + ", ".join(missing_fields)
+            )
+
+        owner_data = metadata["owner"]
+        license_data = metadata.get("license") or {}
+
+        if not isinstance(owner_data, dict):
+            raise ValueError("Invalid repository owner metadata.")
+
+        if not isinstance(license_data, dict):
+            license_data = {}
+
+        owner = owner_data.get("login")
+
+        if not owner:
+            raise ValueError("Repository owner is missing.")
+
+        checked_at = datetime.now(timezone.utc).isoformat()
+
+        with self.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO repositories (
+                    full_name,
+                    github_id,
+                    name,
+                    owner,
+                    html_url,
+                    description,
+                    stars,
+                    forks,
+                    size_kb,
+                    license_spdx_id,
+                    license_name,
+                    created_at,
+                    updated_at,
+                    pushed_at,
+                    archived,
+                    disabled,
+                    is_fork,
+                    default_branch,
+                    screening_status,
+                    screening_reasons_json,
+                    screening_warnings_json,
+                    last_checked_at
+                )
+                VALUES (
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                )
+                ON CONFLICT(full_name)
+                DO UPDATE SET
+                    github_id = excluded.github_id,
+                    name = excluded.name,
+                    owner = excluded.owner,
+                    html_url = excluded.html_url,
+                    description = excluded.description,
+                    stars = excluded.stars,
+                    forks = excluded.forks,
+                    size_kb = excluded.size_kb,
+                    license_spdx_id = excluded.license_spdx_id,
+                    license_name = excluded.license_name,
+                    created_at = excluded.created_at,
+                    updated_at = excluded.updated_at,
+                    pushed_at = excluded.pushed_at,
+                    archived = excluded.archived,
+                    disabled = excluded.disabled,
+                    is_fork = excluded.is_fork,
+                    default_branch = excluded.default_branch,
+                    screening_status = excluded.screening_status,
+                    screening_reasons_json =
+                        excluded.screening_reasons_json,
+                    screening_warnings_json =
+                        excluded.screening_warnings_json,
+                    last_checked_at = excluded.last_checked_at
+                """,
+                (
+                    metadata["full_name"],
+                    metadata["id"],
+                    metadata["name"],
+                    owner,
+                    metadata["html_url"],
+                    metadata.get("description"),
+                    metadata.get("stargazers_count", 0),
+                    metadata.get("forks_count", 0),
+                    metadata.get("size", 0),
+                    license_data.get("spdx_id"),
+                    license_data.get("name"),
+                    metadata["created_at"],
+                    metadata.get("updated_at"),
+                    metadata.get("pushed_at"),
+                    int(bool(metadata.get("archived", False))),
+                    int(bool(metadata.get("disabled", False))),
+                    int(bool(metadata.get("fork", False))),
+                    metadata.get("default_branch"),
+                    screening_status,
+                    json.dumps(reasons or []),
+                    json.dumps(warnings or []),
+                    checked_at,
+                ),
+            )
+
+    def get_cached_repository(
+        self,
+        full_name: str,
+        max_age_hours: int = 24,
+    ) -> sqlite3.Row | None:
+        """
+        Retrieve repository metadata if its screening result is fresh.
+
+        Returns None when the repository is missing or its cache
+        has expired.
+        """
+        if max_age_hours < 1:
+            raise ValueError("max_age_hours must be at least 1.")
+
+        cutoff = (
+            datetime.now(timezone.utc)
+            - timedelta(hours=max_age_hours)
+        ).isoformat()
+
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM repositories
+                WHERE full_name = ?
+                  AND last_checked_at >= ?
+                """,
+                (full_name, cutoff),
+            ).fetchone()
+
+    def get_repository(
+        self,
+        full_name: str,
+    ) -> sqlite3.Row | None:
+        """Retrieve repository metadata, even if its cache has expired."""
+        with self.connect() as connection:
+            return connection.execute(
+                """
+                SELECT *
+                FROM repositories
+                WHERE full_name = ?
+                """,
+                (full_name,),
+            ).fetchone()
+
+    def list_screened_repositories(
+        self,
+        screening_status: str | None = None,
+        limit: int = 100,
+    ) -> list[sqlite3.Row]:
+        """List cached repositories, optionally filtered by decision."""
+        if limit < 1:
+            raise ValueError("limit must be at least 1.")
+
+        if (
+            screening_status is not None
+            and screening_status not in self.VALID_SCREENING_STATUSES
+        ):
+            raise ValueError("Invalid screening status.")
+
+        query = "SELECT * FROM repositories"
+        parameters: list[object] = []
+
+        if screening_status is not None:
+            query += " WHERE screening_status = ?"
+            parameters.append(screening_status)
+
+        query += " ORDER BY last_checked_at DESC LIMIT ?"
+        parameters.append(limit)
+
+        with self.connect() as connection:
+            return connection.execute(
+                query,
+                parameters,
+            ).fetchall()
 
     def save_issues(self, issues: list[Issue]) -> int:
         """Save issues, updating existing records instead of duplicating them."""
