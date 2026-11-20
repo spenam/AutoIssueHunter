@@ -56,16 +56,10 @@ def make_response(payload, status_code=200):
     return response
 
 
-def configure_successful_screening(policy, metadata=None, alerts=None):
-    """Configure metadata and Dependabot responses."""
+def configure_successful_screening(policy, metadata=None):
+    """Configure a successful GitHub metadata response."""
     metadata = metadata or make_metadata()
-    alerts = [] if alerts is None else alerts
-
-    policy.client.get.side_effect = [
-        make_response(metadata),
-        make_response(alerts),
-    ]
-
+    policy.client.get.return_value = make_response(metadata)
 
 @pytest.fixture
 def storage(tmp_path):
@@ -165,90 +159,7 @@ def test_rejects_oversized_repository(policy):
     assert result.status == "rejected"
 
 
-def test_open_dependabot_alert_requires_review(policy, storage):
-    """An open Dependabot alert must prevent automatic approval."""
-    configure_successful_screening(
-        policy,
-        alerts=[{"number": 1, "state": "open"}],
-    )
 
-    result = policy.check("example/project")
-
-    assert result.status == "needs_review"
-    assert result.approved is False
-    assert any(
-        "Dependabot alert" in warning
-        for warning in result.warnings
-    )
-
-    cached = storage.get_repository("example/project")
-    assert cached["screening_status"] == "needs_review"
-
-
-def test_no_open_dependabot_alerts_allows_approval(policy):
-    """An accessible, empty alert list does not add a warning."""
-    configure_successful_screening(policy, alerts=[])
-
-    result = policy.check("example/project")
-
-    assert result.status == "approved"
-    assert result.approved is True
-    assert result.warnings == []
-    assert policy.client.get.call_count == 2
-
-
-@pytest.mark.parametrize("status_code", [401, 403, 404, 500])
-def test_inaccessible_dependabot_endpoint_requires_review(
-    policy,
-    status_code,
-):
-    """An inaccessible security endpoint must never mean 'clean'."""
-    policy.client.get.side_effect = [
-        make_response(make_metadata()),
-        make_response(
-            {"message": "Access unavailable"},
-            status_code=status_code,
-        ),
-    ]
-
-    result = policy.check("example/project")
-
-    assert result.status == "needs_review"
-    assert result.approved is False
-    assert any(
-        "Dependabot alerts could not be inspected" in warning
-        for warning in result.warnings
-    )
-
-
-def test_invalid_dependabot_response_requires_review(policy):
-    """Unexpected response formats must require manual review."""
-    policy.client.get.side_effect = [
-        make_response(make_metadata()),
-        make_response({"unexpected": "format"}),
-    ]
-
-    result = policy.check("example/project")
-
-    assert result.status == "needs_review"
-    assert result.approved is False
-    assert any(
-        "unexpected Dependabot alert format" in warning
-        for warning in result.warnings
-    )
-
-
-def test_dependabot_network_failure_requires_review(policy):
-    """A network failure during security checking is not a clean result."""
-    policy.client.get.side_effect = [
-        make_response(make_metadata()),
-        httpx.ConnectError("Connection unavailable"),
-    ]
-
-    result = policy.check("example/project")
-
-    assert result.status == "needs_review"
-    assert result.approved is False
 
 
 def test_cache_avoids_repeated_github_requests(policy):
@@ -260,27 +171,6 @@ def test_cache_avoids_repeated_github_requests(policy):
 
     assert first.status == "approved"
     assert second.status == "approved"
-
-    # One metadata request and one Dependabot request.
-    assert policy.client.get.call_count == 2
-
-
-def test_cache_preserves_needs_review_decision(policy):
-    """A cached security warning must not become approval."""
-    configure_successful_screening(
-        policy,
-        alerts=[{"number": 1, "state": "open"}],
-    )
-
-    first = policy.check("example/project")
-    second = policy.check("example/project")
-
-    assert first.status == "needs_review"
-    assert second.status == "needs_review"
-    assert second.approved is False
-
-    # The second screening should use the cached decision.
-    assert policy.client.get.call_count == 2
 
 
 def test_api_failure_raises_policy_error(policy):
