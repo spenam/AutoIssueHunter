@@ -9,6 +9,7 @@ from issuehunter.analysis import (
     IssueAnalyzer,
 )
 from issuehunter.models import Issue, IssueState
+from issuehunter.repository import RepositoryInfo
 
 
 @pytest.fixture
@@ -61,8 +62,37 @@ def llm():
 
 
 @pytest.fixture
-def analyzer(storage, llm):
-    return IssueAnalyzer(llm=llm, storage=storage)
+def repository():
+    mock = Mock()
+    mock.clone.return_value = Mock()
+    mock.inspect.return_value = RepositoryInfo(
+        full_name="example/project",
+        path=Mock(),
+        files=[
+            "src/main.py",
+            "src/startup.py",
+            "tests/test_startup.py",
+        ],
+        project_files=["pyproject.toml", "README.md"],
+        primary_language="Python",
+    )
+    mock.read_file.side_effect = lambda full_name, path: {
+        "src/main.py": "def main():\\n    initialize()\\n",
+        "src/startup.py": "def initialize():\\n    pass\\n",
+        "tests/test_startup.py": "def test_startup():\\n    assert True\\n",
+        "pyproject.toml": "[project]\\nname = 'example'\\n",
+        "README.md": "# Example project\\n",
+    }[path]
+    return mock
+
+
+@pytest.fixture
+def analyzer(storage, llm, repository):
+    return IssueAnalyzer(
+        llm=llm,
+        storage=storage,
+        repository_inspector=repository,
+    )
 
 
 def test_approved_repository_can_be_analyzed(
@@ -70,6 +100,7 @@ def test_approved_repository_can_be_analyzed(
     issue,
     storage,
     llm,
+    repository,
 ):
     result = analyzer.analyze(issue)
 
@@ -78,6 +109,8 @@ def test_approved_repository_can_be_analyzed(
     storage.get_repository.assert_called_once_with(
         "example/project"
     )
+    repository.clone.assert_called_once_with("example/project")
+    repository.inspect.assert_called_once_with("example/project")
     llm.generate.assert_called_once()
     storage.save_analysis.assert_called_once()
 
@@ -87,6 +120,7 @@ def test_unscreened_repository_is_blocked(
     issue,
     storage,
     llm,
+    repository,
 ):
     storage.get_repository.return_value = None
 
@@ -94,6 +128,7 @@ def test_unscreened_repository_is_blocked(
         analyzer.analyze(issue)
 
     llm.generate.assert_not_called()
+    repository.clone.assert_not_called()
 
 
 @pytest.mark.parametrize(
@@ -105,6 +140,7 @@ def test_non_approved_repository_is_blocked(
     issue,
     storage,
     llm,
+    repository,
     status,
 ):
     storage.get_repository.return_value = {
@@ -116,6 +152,7 @@ def test_non_approved_repository_is_blocked(
 
     llm.generate.assert_not_called()
     storage.save_analysis.assert_not_called()
+    repository.clone.assert_not_called()
 
 
 def test_cached_analysis_cannot_bypass_screening(
@@ -123,11 +160,11 @@ def test_cached_analysis_cannot_bypass_screening(
     issue,
     storage,
     llm,
+    repository,
 ):
     storage.get_repository.return_value = {
         "screening_status": "needs_review",
     }
-
     storage.get_latest_analysis.return_value = Mock()
 
     with pytest.raises(IssueAnalysisError):
@@ -135,6 +172,7 @@ def test_cached_analysis_cannot_bypass_screening(
 
     storage.get_latest_analysis.assert_not_called()
     llm.generate.assert_not_called()
+    repository.clone.assert_not_called()
 
 
 def test_approved_repository_can_reuse_cached_analysis(
@@ -142,6 +180,7 @@ def test_approved_repository_can_reuse_cached_analysis(
     issue,
     storage,
     llm,
+    repository,
 ):
     cached_analysis = Mock()
     storage.get_latest_analysis.return_value = cached_analysis
@@ -151,6 +190,7 @@ def test_approved_repository_can_reuse_cached_analysis(
     assert result is cached_analysis
     llm.generate.assert_not_called()
     storage.save_analysis.assert_not_called()
+    repository.clone.assert_not_called()
 
 
 def test_force_reanalyzes_approved_repository(
@@ -158,9 +198,11 @@ def test_force_reanalyzes_approved_repository(
     issue,
     storage,
     llm,
+    repository,
 ):
     result = analyzer.analyze(issue, force=True)
 
     assert result.issue_id == issue.id
     llm.generate.assert_called_once()
     storage.save_analysis.assert_called_once()
+    repository.clone.assert_called_once_with("example/project")
