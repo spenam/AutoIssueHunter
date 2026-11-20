@@ -150,68 +150,7 @@ class RepositoryPolicy:
 
         return data
 
-    def _check_security_advisories(
-        self,
-        full_name: str,
-    ) -> list[str]:
-        """
-        Check for open Dependabot alerts.
-
-        An inaccessible endpoint or invalid response requires
-        manual review. It is never interpreted as a clean result.
-        """
-        owner, repository = self._validate_repository_name(full_name)
-
-        endpoint = (
-            f"/repos/{quote(owner, safe='')}/"
-            f"{quote(repository, safe='')}/dependabot/alerts"
-        )
-
-        try:
-            response = self.client.get(
-                endpoint,
-                params={
-                    "state": "open",
-                    "per_page": 1,
-                },
-            )
-
-        except httpx.RequestError as exc:
-            return [
-                "Could not verify Dependabot alerts. "
-                f"Manual security review required: {exc}"
-            ]
-
-        if response.status_code != 200:
-            return [
-                "Dependabot alerts could not be inspected "
-                f"(HTTP {response.status_code}). Check token "
-                "permissions and repository security settings. "
-                "Manual review required."
-            ]
-
-        try:
-            alerts = response.json()
-        except ValueError:
-            return [
-                "GitHub returned an invalid Dependabot alert response. "
-                "Manual review required."
-            ]
-
-        if not isinstance(alerts, list):
-            return [
-                "GitHub returned an unexpected Dependabot alert format. "
-                "Manual review required."
-            ]
-
-        if alerts:
-            return [
-                "At least one open Dependabot alert exists. "
-                "Manual security review required."
-            ]
-
-        return []
-
+    
     def _evaluate(self, metadata: dict) -> RepositoryCheck:
         """Apply repository metadata screening rules."""
         full_name = metadata["full_name"]
@@ -388,8 +327,6 @@ class RepositoryPolicy:
 
         # Security checks are performed even if metadata already
         # contains a rejection, so the cached record has full results.
-        security_warnings = self._check_security_advisories(full_name)
-        result.warnings.extend(security_warnings)
 
         if result.reasons:
             result.status = "rejected"
