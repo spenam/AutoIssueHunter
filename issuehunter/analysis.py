@@ -7,6 +7,7 @@ from pydantic import ValidationError
 
 from issuehunter.llm.client import OllamaClient
 from issuehunter.models import (
+    AnalysisEvidence,
     Issue,
     IssueAnalysis,
     ReproductionStatus,
@@ -31,6 +32,18 @@ Rules:
 - Return only valid JSON matching the requested schema.
 - Set reproduction_status to "not_attempted".
 - Set confidence according to the evidence available in the issue description.
+- Every evidence item must identify its source and explain what it supports.
+- Use evidence_type "issue_description" for information from the issue.
+- Use evidence_type "repository" only when repository source content was supplied.
+- Never invent source files, functions, test names, or code behavior.
+- Set root_cause_confirmed to true only when the supplied evidence
+  directly establishes the root cause.
+- Otherwise, set root_cause_confirmed to false.
+- Suggested changes must be actionable but must not pretend that
+  source code was inspected when it was not.
+- Regression tests must describe tests that should be added or run,
+  not tests that have already passed.
+- Keep reproduction_status as "not_attempted".
 """
 
 
@@ -38,12 +51,23 @@ ANALYSIS_SCHEMA = """
 {
   "summary": "Short summary of the issue",
   "suspected_root_cause": "Possible cause, or null if unknown",
+  "root_cause_confirmed": false,
+  "evidence": [
+    {
+      "source": "Issue description or inspected file path",
+      "description": "What this evidence supports",
+      "evidence_type": "issue_description"
+    }
+  ],
+  "investigation_notes": [],
   "relevant_files": [],
   "relevant_components": [],
-  "difficulty": "beginner",
+  "difficulty": "intermediate",
   "estimated_hours": 2.0,
   "confidence": 35,
   "implementation_plan": [],
+  "suggested_changes": [],
+  "regression_tests": [],
   "risks": []
 }
 """
@@ -115,13 +139,42 @@ class IssueAnalyzer:
                 issue_id=issue.id,
                 summary=data["summary"],
                 suspected_root_cause=data.get("suspected_root_cause"),
+                root_cause_confirmed=data.get(
+                    "root_cause_confirmed",
+                    False,
+                ),
+                evidence=[
+                    AnalysisEvidence.model_validate(item)
+                    for item in data.get("evidence", [])
+                ],
+                investigation_notes=data.get(
+                    "investigation_notes",
+                    [],
+                ),
                 relevant_files=data.get("relevant_files", []),
-                relevant_components=data.get("relevant_components", []),
-                difficulty=data.get("difficulty", "intermediate"),
+                relevant_components=data.get(
+                    "relevant_components",
+                    [],
+                ),
+                difficulty=data.get(
+                    "difficulty",
+                    "intermediate",
+                ),
                 estimated_hours=data.get("estimated_hours"),
                 reproduction_status=ReproductionStatus.NOT_ATTEMPTED,
                 confidence=data.get("confidence", 0),
-                implementation_plan=data.get("implementation_plan", []),
+                implementation_plan=data.get(
+                    "implementation_plan",
+                    [],
+                ),
+                suggested_changes=data.get(
+                    "suggested_changes",
+                    [],
+                ),
+                regression_tests=data.get(
+                    "regression_tests",
+                    [],
+                ),
                 risks=data.get("risks", []),
             )
 
