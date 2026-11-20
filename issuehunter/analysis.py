@@ -241,6 +241,7 @@ class IssueAnalyzer:
                 f"#{issue.number}: {exc}"
             ) from exc
 
+        self.storage.save_issues([issue])
         self.storage.save_analysis(analysis)
 
         return analysis
