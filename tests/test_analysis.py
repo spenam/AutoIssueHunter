@@ -206,3 +206,84 @@ def test_force_reanalyzes_approved_repository(
     llm.generate.assert_called_once()
     storage.save_analysis.assert_called_once()
     repository.clone.assert_called_once_with("example/project")
+
+def test_source_files_are_prioritized_over_documentation(
+    analyzer,
+    issue,
+):
+    files = [
+        "README.md",
+        "docs/startup.md",
+        "pyproject.toml",
+        "src/startup.py",
+        "src/main.py",
+    ]
+
+    selected = analyzer._select_relevant_files(
+        issue,
+        files,
+        ["README.md", "pyproject.toml"],
+    )
+
+    assert "src/startup.py" in selected
+    assert "src/main.py" in selected
+    assert "README.md" not in selected
+    assert "pyproject.toml" not in selected
+
+
+def test_relevant_filenames_receive_higher_priority(
+    analyzer,
+    issue,
+):
+    files = [
+        "src/database.py",
+        "src/startup.py",
+        "src/network.py",
+    ]
+
+    selected = analyzer._select_relevant_files(
+        issue,
+        files,
+        [],
+    )
+
+    assert selected[0] == "src/startup.py"
+
+
+def test_file_selection_respects_maximum_file_count(
+    analyzer,
+    issue,
+):
+    files = [
+        f"src/module_{index}.py"
+        for index in range(20)
+    ]
+
+    selected = analyzer._select_relevant_files(
+        issue,
+        files,
+        [],
+    )
+
+    assert len(selected) <= analyzer.MAX_FILES_TO_READ
+
+
+def test_unsupported_file_types_are_excluded(
+    analyzer,
+    issue,
+):
+    files = [
+        "src/startup.py",
+        "assets/logo.png",
+        "data/archive.zip",
+        "docs/manual.pdf",
+        "src/main.exe",
+    ]
+
+    selected = analyzer._select_relevant_files(
+        issue,
+        files,
+        [],
+    )
+
+    assert selected == ["src/startup.py"]
