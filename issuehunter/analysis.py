@@ -91,8 +91,6 @@ class IssueAnalyzer:
         ".go", ".rs", ".java", ".rb", ".php", ".cs",
         ".cpp", ".c", ".h", ".hpp", ".css", ".scss",
         ".html", ".vue", ".svelte", ".sql", ".sh",
-        ".toml", ".yaml", ".yml", ".json", ".xml",
-        ".ini", ".cfg", ".md", ".txt",
     }
 
     STOP_WORDS = {
