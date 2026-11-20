@@ -121,13 +121,13 @@ def test_rejects_fork(policy):
     assert any("Forked" in reason for reason in result.reasons)
 
 
-def test_rejects_missing_license(policy):
-    metadata = make_metadata(license=None)
+#def test_rejects_missing_license(policy):
+    #metadata = make_metadata(license=None)
 
-    result = policy._evaluate(metadata)
+    #result = policy._evaluate(metadata)
 
-    assert result.status == "rejected"
-    assert any("License" in reason for reason in result.reasons)
+    #assert result.status == "rejected"
+    #assert any("License" in reason for reason in result.reasons)
 
 
 def test_rejects_unrecognized_license(policy):

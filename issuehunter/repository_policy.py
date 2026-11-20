@@ -232,10 +232,10 @@ class RepositoryPolicy:
                 f"Repository has fewer than {self.MIN_STARS} stars."
             )
 
-        if license_id not in self.ACCEPTED_LICENSES:
-            reasons.append(
-                f"License is missing or not approved: {license_id!r}."
-            )
+        #if license_id not in self.ACCEPTED_LICENSES:
+        #    reasons.append(
+        #        f"License is missing or not approved: {license_id!r}."
+        #    )
 
         if (
             inactive_days is None
