@@ -35,7 +35,7 @@ class Settings(BaseSettings):
 
     # Application
     log_level: LogLevel = "INFO"
-    request_timeout: float = Field(default=30.0, gt=0, le=300)
+    request_timeout: float = Field(default=30.0, gt=0, le=10000)
 
     # Discovery preferences
     default_language: str = "python"
