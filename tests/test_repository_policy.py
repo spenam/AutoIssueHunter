@@ -1,0 +1,179 @@
+
+from datetime import datetime, timedelta, timezone
+from unittest.mock import Mock
+
+import pytest
+
+from issuehunter.repository_policy import (
+    RepositoryPolicy,
+    RepositoryPolicyError,
+)
+from issuehunter.storage import Storage
+
+
+def make_metadata(**overrides):
+    """Build realistic GitHub repository metadata for testing."""
+    now = datetime.now(timezone.utc)
+
+    metadata = {
+        "id": 123456,
+        "full_name": "example/project",
+        "name": "project",
+        "owner": {"login": "example"},
+        "html_url": "https://github.com/example/project",
+        "description": "Example open-source project",
+        "stargazers_count": 100,
+        "forks_count": 10,
+        "size": 10000,
+        "license": {
+            "spdx_id": "MIT",
+            "name": "MIT License",
+        },
+        "created_at": (
+            now - timedelta(days=180)
+        ).isoformat(),
+        "updated_at": now.isoformat(),
+        "pushed_at": (
+            now - timedelta(days=10)
+        ).isoformat(),
+        "archived": False,
+        "disabled": False,
+        "fork": False,
+        "default_branch": "main",
+    }
+
+    metadata.update(overrides)
+    return metadata
+
+
+@pytest.fixture
+def storage(tmp_path):
+    """Create an isolated temporary SQLite database."""
+    database = Storage(tmp_path / "test.sqlite3")
+    database.initialize()
+    return database
+
+
+@pytest.fixture
+def policy(storage):
+    """Create a policy with a mocked HTTP client."""
+    client = Mock()
+
+    return RepositoryPolicy(
+        storage=storage,
+        client=client,
+    )
+
+
+def test_approved_repository(policy):
+    metadata = make_metadata()
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "approved"
+    assert result.approved is True
+    assert result.reasons == []
+
+
+def test_rejects_repository_with_too_few_stars(policy):
+    metadata = make_metadata(stargazers_count=49)
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "rejected"
+    assert any("stars" in reason for reason in result.reasons)
+
+
+def test_rejects_repository_too_young(policy):
+    created_at = (
+        datetime.now(timezone.utc) - timedelta(days=30)
+    ).isoformat()
+
+    metadata = make_metadata(created_at=created_at)
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "rejected"
+    assert any("young" in reason for reason in result.reasons)
+
+
+def test_rejects_fork(policy):
+    metadata = make_metadata(fork=True)
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "rejected"
+    assert any("Forked" in reason for reason in result.reasons)
+
+
+def test_rejects_missing_license(policy):
+    metadata = make_metadata(license=None)
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "rejected"
+    assert any("License" in reason for reason in result.reasons)
+
+
+def test_rejects_unrecognized_license(policy):
+    metadata = make_metadata(
+        license={
+            "spdx_id": "UNKNOWN-LICENSE",
+            "name": "Unknown License",
+        }
+    )
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "rejected"
+
+
+def test_security_warning_requires_review(policy):
+    metadata = make_metadata(security_advisory_count=1)
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "needs_review"
+    assert result.approved is False
+
+
+def test_rejects_archived_repository(policy):
+    metadata = make_metadata(archived=True)
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "rejected"
+
+
+def test_rejects_oversized_repository(policy):
+    metadata = make_metadata(size=600000)
+
+    result = policy._evaluate(metadata)
+
+    assert result.status == "rejected"
+
+
+def test_cache_avoids_repeated_github_requests(policy, storage):
+    metadata = make_metadata()
+
+    policy.client.get.return_value.json.return_value = metadata
+    policy.client.get.return_value.raise_for_status.return_value = None
+
+    first = policy.check("example/project")
+    second = policy.check("example/project")
+
+    assert first.status == "approved"
+    assert second.status == "approved"
+
+    assert policy.client.get.call_count == 1
+
+
+def test_api_failure_raises_policy_error(policy):
+    import httpx
+
+    policy.client.get.side_effect = httpx.ConnectError(
+        "Connection unavailable"
+    )
+
+    with pytest.raises(RepositoryPolicyError):
+        policy.check("example/project")
