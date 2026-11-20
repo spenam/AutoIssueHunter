@@ -83,9 +83,9 @@ class IssueAnalysisError(Exception):
 class IssueAnalyzer:
     """Uses Ollama and repository source files to investigate GitHub issues."""
 
-    MAX_FILES_TO_READ = 8
-    MAX_FILE_BYTES = 50_000
-    MAX_TOTAL_SOURCE_BYTES = 200_000
+    MAX_FILES_TO_READ = 4
+    MAX_FILE_BYTES = 12_000
+    MAX_TOTAL_SOURCE_BYTES = 30_000
 
     SOURCE_EXTENSIONS = {
         ".py", ".pyi", ".js", ".jsx", ".ts", ".tsx",
