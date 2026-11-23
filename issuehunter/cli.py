@@ -1,4 +1,5 @@
 import json
+import sys
 from datetime import datetime
 from typing import Annotated, NoReturn
 
@@ -19,6 +20,12 @@ app = typer.Typer(
     help="Discover and investigate open-source GitHub issues.",
     no_args_is_help=True,
 )
+
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+if hasattr(sys.stderr, "reconfigure"):
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+
 console = Console()
 
 
