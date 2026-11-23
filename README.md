@@ -31,7 +31,7 @@ The current screening policy checks:
 - Repository age (at least 90 days).
 - Repository popularity (at least 50 stars).
 - Recent activity (activity within the last 730 days).
-- Repository size (maximum 500 MB).
+- Repository size (maximum 100 MB, to prefer manageable mid-sized codebases).
 - Repository availability (not archived or disabled).
 - Repository type (forks are rejected).
 - Availability of a default branch.

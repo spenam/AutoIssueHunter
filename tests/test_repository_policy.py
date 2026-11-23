@@ -152,7 +152,7 @@ def test_rejects_archived_repository(policy):
 
 
 def test_rejects_oversized_repository(policy):
-    metadata = make_metadata(size=600000)
+    metadata = make_metadata(size=100001)
 
     result = policy._evaluate(metadata)
 
@@ -171,6 +171,17 @@ def test_cache_avoids_repeated_github_requests(policy):
 
     assert first.status == "approved"
     assert second.status == "approved"
+
+
+def test_cached_oversized_repository_is_rejected(policy):
+    metadata = make_metadata(size=100001)
+    configure_successful_screening(policy, metadata)
+
+    first = policy.check("example/project")
+    second = policy.check("example/project")
+
+    assert first.status == "rejected"
+    assert second.status == "rejected"
 
 
 def test_api_failure_raises_policy_error(policy):
