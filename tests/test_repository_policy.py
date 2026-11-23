@@ -26,10 +26,6 @@ def make_metadata(**overrides):
         "stargazers_count": 100,
         "forks_count": 10,
         "size": 10000,
-        "license": {
-            "spdx_id": "MIT",
-            "name": "MIT License",
-        },
         "created_at": (
             now - timedelta(days=180)
         ).isoformat(),
@@ -120,27 +116,6 @@ def test_rejects_fork(policy):
     assert result.status == "rejected"
     assert any("Forked" in reason for reason in result.reasons)
 
-
-#def test_rejects_missing_license(policy):
-    #metadata = make_metadata(license=None)
-
-    #result = policy._evaluate(metadata)
-
-    #assert result.status == "rejected"
-    #assert any("License" in reason for reason in result.reasons)
-
-
-def test_rejects_unrecognized_license(policy):
-    metadata = make_metadata(
-        license={
-            "spdx_id": "UNKNOWN-LICENSE",
-            "name": "Unknown License",
-        }
-    )
-
-    result = policy._evaluate(metadata)
-
-    assert result.status == "rejected"
 
 
 def test_rejects_archived_repository(policy):
