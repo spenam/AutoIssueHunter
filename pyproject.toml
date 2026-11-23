@@ -12,7 +12,7 @@ requires-python = ">=3.11"
 license = { text = "MIT" }
 
 authors = [
-    { name = "AutoIssueHunter Contributors" }
+    { name = "Santiago Pena Martinez" }
 ]
 
 keywords = [
