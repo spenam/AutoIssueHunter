@@ -117,6 +117,7 @@ AutoIssueHunter/
 ├── issuehunter/
 │   ├── llm/
 │   │   └── client.py
+│   ├── cli.py
 │   │
 │   ├── analysis.py
 │   ├── config.py
@@ -280,6 +281,28 @@ Copy-Item .env.example .env
 ```
 
 Edit `.env` to configure the application.
+
+### 6. Use the CLI
+
+The `issuehunter` command exposes the local discovery and investigation workflow:
+
+```bash
+# Find open issues and screen their repositories
+issuehunter discover --language python --label bug --limit 10
+
+# Review saved issues and repository decisions
+issuehunter issues
+issuehunter repositories --status approved
+
+# Screen a repository explicitly, then analyze a saved issue
+issuehunter screen pallets/flask
+issuehunter analyze 123456789
+
+# Verify the local database
+issuehunter health
+```
+
+Use `--help` with the command or any subcommand to see all available options.
 
 ---
 
