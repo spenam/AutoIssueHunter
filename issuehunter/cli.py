@@ -11,7 +11,7 @@ from rich.table import Table
 from issuehunter.analysis import IssueAnalysisError, IssueAnalyzer
 from issuehunter.discovery import IssueDiscovery
 from issuehunter.github_client import GitHubAPIError
-from issuehunter.models import Issue
+from issuehunter.models import Issue, IssueAnalysis
 from issuehunter.repository_policy import RepositoryPolicy, RepositoryPolicyError
 from issuehunter.storage import Storage
 
@@ -196,6 +196,10 @@ def analyze(
         bool,
         typer.Option("--force", help="Regenerate an existing analysis."),
     ] = False,
+    json_output: Annotated[
+        bool,
+        typer.Option("--json", help="Print the complete analysis as JSON."),
+    ] = False,
 ) -> None:
     """Analyze a saved issue with the configured local Ollama model."""
     storage = Storage()
@@ -211,16 +215,11 @@ def analyze(
     except (IssueAnalysisError, ValueError, ValidationError) as exc:
         _fail(str(exc))
 
-    console.print(f"[bold]{issue.title}[/bold]")
-    console.print(f"{issue.repository_full_name}#{issue.number}")
-    console.print(f"\n{result.summary}\n")
-    console.print(f"Confidence: {result.confidence:.0f}%")
-    if result.suspected_root_cause:
-        console.print(f"Root cause: {result.suspected_root_cause}")
-    _print_bullets("Implementation plan", result.implementation_plan)
-    _print_bullets("Suggested changes", result.suggested_changes)
-    _print_bullets("Regression tests", result.regression_tests)
-    _print_bullets("Risks", result.risks)
+    if json_output:
+        console.print_json(result.model_dump_json())
+        return
+
+    _print_analysis(issue, result)
 
 
 @app.command()
@@ -251,6 +250,63 @@ def _print_bullets(title: str, values: list[str]) -> None:
         console.print(f"\n[bold]{title}[/bold]")
         for value in values:
             console.print(f"- {value}")
+
+
+def _print_analysis(issue: Issue, result: IssueAnalysis) -> None:
+    console.print(f"\n[bold cyan]{issue.title}[/bold cyan]")
+    console.print(
+        f"[bold]{issue.repository_full_name}#{issue.number}[/bold]  [dim]{issue.html_url}[/dim]"
+    )
+
+    metadata = Table.grid(padding=(0, 2))
+    metadata.add_row(
+        "[bold]Confidence[/bold]",
+        f"{result.confidence:.0f}%",
+        "[bold]Difficulty[/bold]",
+        result.difficulty.value,
+    )
+    metadata.add_row(
+        "[bold]Estimated effort[/bold]",
+        (f"{result.estimated_hours:g} hours" if result.estimated_hours is not None else "Unknown"),
+        "[bold]Root cause[/bold]",
+        "Confirmed" if result.root_cause_confirmed else "Hypothesis",
+    )
+    metadata.add_row(
+        "[bold]Reproduction[/bold]",
+        result.reproduction_status.value,
+        "[bold]Analyzed[/bold]",
+        result.analyzed_at.isoformat(),
+    )
+    console.print(metadata)
+
+    console.print("\n[bold]Summary[/bold]")
+    console.print(result.summary)
+
+    if result.suspected_root_cause:
+        console.print("\n[bold]Suspected root cause[/bold]")
+        console.print(result.suspected_root_cause)
+
+    if result.evidence:
+        console.print("\n[bold]Evidence[/bold]")
+        evidence_table = Table("Source", "Type", "Finding")
+        for item in result.evidence:
+            evidence_table.add_row(
+                item.source,
+                item.evidence_type,
+                item.description,
+            )
+        console.print(evidence_table)
+
+    if result.relevant_files:
+        _print_bullets("Relevant files", result.relevant_files)
+    if result.relevant_components:
+        _print_bullets("Relevant components", result.relevant_components)
+
+    _print_bullets("Investigation notes", result.investigation_notes)
+    _print_bullets("Implementation plan", result.implementation_plan)
+    _print_bullets("Suggested changes", result.suggested_changes)
+    _print_bullets("Regression tests", result.regression_tests)
+    _print_bullets("Risks", result.risks)
 
 
 if __name__ == "__main__":

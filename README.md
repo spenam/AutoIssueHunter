@@ -299,6 +299,9 @@ issuehunter repositories --status approved
 issuehunter screen pallets/flask
 issuehunter analyze 123456789
 
+# Print the complete saved or newly generated analysis as machine-readable JSON
+issuehunter analyze 123456789 --json
+
 # Verify the local database
 issuehunter health
 ```
