@@ -69,6 +69,7 @@ class IssueDiscovery:
         parts = [
             f"language:{language}",
             "no:assignee",
+            "-linked:pr",
         ]
 
         if labels:

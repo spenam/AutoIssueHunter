@@ -19,6 +19,7 @@ The project uses [GitHub](https://github.com/) as its issue and repository sourc
 - Search for open GitHub issues using GitHub's Search API.
 - Filter issues using GitHub search qualifiers, such as programming language and labels.
 - Exclude pull requests from search results.
+- Exclude issues that already have a linked pull request.
 - Retrieve issue descriptions, labels, repository information, and timestamps.
 - Support paginated issue searches.
 
