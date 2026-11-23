@@ -39,7 +39,7 @@ class RepositoryPolicy:
     MIN_STARS = 50
     MIN_AGE_DAYS = 90
     MAX_INACTIVE_DAYS = 730
-    MAX_SIZE_KB = 500_000
+    MAX_SIZE_KB = 100_000
     CACHE_HOURS = 24
 
     ACCEPTED_LICENSES = {
@@ -247,7 +247,7 @@ class RepositoryPolicy:
 
         if size_kb > self.MAX_SIZE_KB:
             reasons.append(
-                "Repository exceeds the 500 MB size limit."
+                "Repository exceeds the 100 MB mid-size limit."
             )
 
         if not metadata.get("default_branch"):
@@ -275,10 +275,22 @@ class RepositoryPolicy:
         """Convert a cached database row into a screening result."""
         import json
 
+        status = row["screening_status"]
+        reasons = json.loads(row["screening_reasons_json"])
+
+        if (
+            status == "approved"
+            and row["size_kb"] > self.MAX_SIZE_KB
+        ):
+            status = "rejected"
+            reasons.append(
+                "Repository exceeds the 100 MB mid-size limit."
+            )
+
         return RepositoryCheck(
             full_name=row["full_name"],
-            status=row["screening_status"],
-            reasons=json.loads(row["screening_reasons_json"]),
+            status=status,
+            reasons=reasons,
             warnings=json.loads(row["screening_warnings_json"]),
             stars=row["stars"],
             forks=row["forks"],

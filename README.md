@@ -19,6 +19,7 @@ The project uses [GitHub](https://github.com/) as its issue and repository sourc
 - Search for open GitHub issues using GitHub's Search API.
 - Filter issues using GitHub search qualifiers, such as programming language and labels.
 - Exclude pull requests from search results.
+- Exclude issues that already have a linked pull request.
 - Retrieve issue descriptions, labels, repository information, and timestamps.
 - Support paginated issue searches.
 
@@ -31,7 +32,7 @@ The current screening policy checks:
 - Repository age (at least 90 days).
 - Repository popularity (at least 50 stars).
 - Recent activity (activity within the last 730 days).
-- Repository size (maximum 500 MB).
+- Repository size (maximum 100 MB, to prefer manageable mid-sized codebases).
 - Repository availability (not archived or disabled).
 - Repository type (forks are rejected).
 - Availability of a default branch.
@@ -297,6 +298,9 @@ issuehunter repositories --status approved
 # Screen a repository explicitly, then analyze a saved issue
 issuehunter screen pallets/flask
 issuehunter analyze 123456789
+
+# Print the complete saved or newly generated analysis as machine-readable JSON
+issuehunter analyze 123456789 --json
 
 # Verify the local database
 issuehunter health

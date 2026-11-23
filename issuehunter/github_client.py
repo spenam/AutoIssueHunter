@@ -66,7 +66,7 @@ class GitHubClient:
         if page < 1:
             raise ValueError("page must be at least 1.")
 
-        search_query = f"{query.strip()} is:issue is:open"
+        search_query = f"{query.strip()} is:issue is:open -linked:pr"
 
         try:
             response = self.client.get(

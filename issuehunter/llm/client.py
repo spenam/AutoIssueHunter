@@ -80,6 +80,7 @@ class OllamaClient:
                     "options": {
                         "temperature": temperature,
                         "num_ctx": self.settings.ollama_num_ctx,
+                        "num_predict": 2048,
                     },
                 },
             )

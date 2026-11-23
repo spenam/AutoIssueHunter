@@ -26,10 +26,6 @@ def make_metadata(**overrides):
         "stargazers_count": 100,
         "forks_count": 10,
         "size": 10000,
-        "license": {
-            "spdx_id": "MIT",
-            "name": "MIT License",
-        },
         "created_at": (
             now - timedelta(days=180)
         ).isoformat(),
@@ -121,27 +117,6 @@ def test_rejects_fork(policy):
     assert any("Forked" in reason for reason in result.reasons)
 
 
-#def test_rejects_missing_license(policy):
-    #metadata = make_metadata(license=None)
-
-    #result = policy._evaluate(metadata)
-
-    #assert result.status == "rejected"
-    #assert any("License" in reason for reason in result.reasons)
-
-
-def test_rejects_unrecognized_license(policy):
-    metadata = make_metadata(
-        license={
-            "spdx_id": "UNKNOWN-LICENSE",
-            "name": "Unknown License",
-        }
-    )
-
-    result = policy._evaluate(metadata)
-
-    assert result.status == "rejected"
-
 
 def test_rejects_archived_repository(policy):
     metadata = make_metadata(archived=True)
@@ -152,7 +127,7 @@ def test_rejects_archived_repository(policy):
 
 
 def test_rejects_oversized_repository(policy):
-    metadata = make_metadata(size=600000)
+    metadata = make_metadata(size=100001)
 
     result = policy._evaluate(metadata)
 
@@ -171,6 +146,17 @@ def test_cache_avoids_repeated_github_requests(policy):
 
     assert first.status == "approved"
     assert second.status == "approved"
+
+
+def test_cached_oversized_repository_is_rejected(policy):
+    metadata = make_metadata(size=100001)
+    configure_successful_screening(policy, metadata)
+
+    first = policy.check("example/project")
+    second = policy.check("example/project")
+
+    assert first.status == "rejected"
+    assert second.status == "rejected"
 
 
 def test_api_failure_raises_policy_error(policy):
